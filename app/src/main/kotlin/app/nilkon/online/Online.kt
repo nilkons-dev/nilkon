@@ -72,15 +72,32 @@ object Online {
     /** One song from its id (used when a link is pasted into the search box). */
     fun lookup(videoId: String): Song {
         var first: Throwable? = null
+        // 1) the music catalogue itself (same endpoint that already powers search and "similar songs")
         try {
-            val d = playerCall(videoId, VR).optJSONObject("videoDetails")
-            if (d != null && d.optString("title").isNotEmpty()) {
-                val th = d.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
-                val art = if (th != null && th.length() > 0) th.getJSONObject(th.length() - 1).optString("url") else ""
-                return Song.online(videoId, d.optString("title"), d.optString("author").removeSuffix(" - Topic"), "",
-                    d.optString("lengthSeconds").toLongOrNull()?.times(1000L) ?: 0L, art)
-            }
+            val body = JSONObject().put("context", context()).put("videoId", videoId)
+                .put("playlistId", "RDAMVM$videoId").put("params", "wAEB")
+            val l = parse(post(NEXT_URL, body), 5)
+            (l.firstOrNull { it.key == "yt:$videoId" } ?: l.firstOrNull())?.let { if (it.videoId == videoId) return it }
         } catch (e: Throwable) { first = e }
+        // 2) public mirror
+        try {
+            val j = pipedCall("streams/$videoId")
+            val t = j.optString("title")
+            if (t.isNotEmpty()) return Song.online(videoId, t, j.optString("uploader").removeSuffix(" - Topic"), "",
+                j.optLong("duration") * 1000L, j.optString("thumbnailUrl"))
+        } catch (e: Throwable) { if (first == null) first = e }
+        // 3) player endpoints
+        for (c in listOf(VR, ANDROID_MUSIC)) {
+            try {
+                val d = playerCall(videoId, c).optJSONObject("videoDetails")
+                if (d != null && d.optString("title").isNotEmpty()) {
+                    val th = d.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
+                    val art = if (th != null && th.length() > 0) th.getJSONObject(th.length() - 1).optString("url") else ""
+                    return Song.online(videoId, d.optString("title"), d.optString("author").removeSuffix(" - Topic"), "",
+                        d.optString("lengthSeconds").toLongOrNull()?.times(1000L) ?: 0L, art)
+                }
+            } catch (e: Throwable) { if (first == null) first = e }
+        }
         try {
             val info = StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$videoId")
             val art = info.thumbnails.maxByOrNull { it.height }?.url ?: ""
@@ -214,7 +231,7 @@ object Online {
     }
 
     // ---------------------------------------------------------------------------- streaming
-    private class Client(val name: String, val id: String, val version: String, val ua: String, val extra: JSONObject.() -> Unit)
+    private class Client(val name: String, val id: String, val version: String, val ua: String, val embed: Boolean = false, val extra: JSONObject.() -> Unit)
 
     private val VR = Client("ANDROID_VR", "28", "1.60.19",
         "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip") {
@@ -225,12 +242,57 @@ object Online {
         "com.google.android.youtube/19.44.38 (Linux; U; Android 11) gzip") {
         put("osName", "Android"); put("osVersion", "11"); put("androidSdkVersion", 30)
     }
+    private val ANDROID_MUSIC = Client("ANDROID_MUSIC", "21", "7.27.52",
+        "com.google.android.apps.youtube.music/7.27.52 (Linux; U; Android 11) gzip") {
+        put("osName", "Android"); put("osVersion", "11"); put("androidSdkVersion", 30)
+    }
+    private val TV_EMBED = Client("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0",
+        "Mozilla/5.0 (PlayStation; PlayStation 4/12.00) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15", true) { }
+    private val IOS = Client("IOS", "5", "20.10.4",
+        "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)") {
+        put("deviceMake", "Apple"); put("deviceModel", "iPhone16,2"); put("osName", "iPhone"); put("osVersion", "18.3.2.22D82")
+    }
+
+    private val PIPED = listOf("https://pipedapi.kavin.rocks", "https://api.piped.private.coffee", "https://pipedapi.adminforge.de")
+
+    /** Asks the public mirrors in turn; the first good answer wins. */
+    private fun pipedCall(path: String): JSONObject {
+        var err: Throwable? = null
+        for (host in PIPED) {
+            try {
+                val req = Request.Builder().url("$host/$path").header("User-Agent", UA).build()
+                val c = client.newBuilder().callTimeout(8, TimeUnit.SECONDS).build()
+                c.newCall(req).execute().use { r ->
+                    if (r.isSuccessful) {
+                        val j = JSONObject(r.body?.string() ?: "{}")
+                        if (j.optString("error").isEmpty()) return j
+                    }
+                }
+            } catch (e: Throwable) { err = e }
+        }
+        throw err ?: IOException("Mirror unavailable")
+    }
+
+    private fun viaPiped(videoId: String): Resolved {
+        val a = pipedCall("streams/$videoId").optJSONArray("audioStreams") ?: throw IOException("No audio stream found for this song")
+        var best: JSONObject? = null
+        var score = -1L
+        for (i in 0 until a.length()) {
+            val f = a.getJSONObject(i)
+            if (f.optString("url").isEmpty()) continue
+            val sc = f.optLong("bitrate") + if (f.optString("mimeType").contains("mp4")) 1_000_000_000L else 0L
+            if (sc > score) { score = sc; best = f }
+        }
+        return Resolved(System.currentTimeMillis(), best?.optString("url") ?: throw IOException("No audio stream found for this song"), UA)
+    }
 
     private fun playerCall(videoId: String, c: Client): JSONObject {
         val cl = JSONObject().put("clientName", c.name).put("clientVersion", c.version)
             .put("hl", "en").put("gl", "US").put("userAgent", c.ua)
         c.extra(cl)
-        val body = JSONObject().put("context", JSONObject().put("client", cl)).put("videoId", videoId)
+        val ctx = JSONObject().put("client", cl)
+        if (c.embed) ctx.put("thirdParty", JSONObject().put("embedUrl", "https://www.youtube.com/"))
+        val body = JSONObject().put("context", ctx).put("videoId", videoId)
             .put("contentCheckOk", true).put("racyCheckOk", true)
         val req = Request.Builder().url("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
             .header("User-Agent", c.ua).header("X-YouTube-Client-Name", c.id).header("X-YouTube-Client-Version", c.version)
@@ -274,7 +336,8 @@ object Online {
     private fun resolveFull(videoId: String): Resolved {
         urlCache[videoId]?.let { if (System.currentTimeMillis() - it.at < TTL_MS) return it }
         var err: Throwable? = null
-        val steps = listOf<() -> Resolved>({ viaPlayer(videoId, VR) }, { viaPlayer(videoId, ANDROID) }, { viaNewPipe(videoId) })
+        val steps = listOf<() -> Resolved>({ viaPlayer(videoId, VR) }, { viaPlayer(videoId, ANDROID_MUSIC) }, { viaPlayer(videoId, TV_EMBED) },
+            { viaPlayer(videoId, IOS) }, { viaPlayer(videoId, ANDROID) }, { viaPiped(videoId) }, { viaNewPipe(videoId) })
         for (step in steps) {
             try { val r = step(); urlCache[videoId] = r; return r }
             catch (e: Throwable) { if (err == null || isNetworkError(e)) err = e; if (isNetworkError(e)) break }
@@ -295,6 +358,8 @@ object Online {
 
     fun friendlyError(e: Throwable): String = when {
         e is java.net.UnknownHostException || e is java.net.SocketTimeoutException -> "No internet connection"
+        (e.message ?: "").contains("not a bot", true) || (e.message ?: "").contains("Sign in", true) ->
+            "YouTube wants a check on this connection - try again in a minute or switch Wi-Fi / mobile data"
         e is IOException && (e.message ?: "").contains("429") -> "Too many requests - try again in a minute"
         else -> e.message?.take(120) ?: "Something went wrong"
     }
