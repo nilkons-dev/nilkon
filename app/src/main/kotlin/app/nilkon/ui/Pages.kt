@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -170,7 +171,7 @@ fun CollectionPage(m: AppModel) {
                 GButton(label, icon, "chip", active = name == k, iconSize = 14) { m.showCollection(k) }
             for (p in Store.playlists.keys.toList()) {
                 val key = PL_PREFIX + p
-                Box(Modifier.pointerInput(p) { androidx.compose.foundation.gestures.detectTapGestures(onLongPress = { m.playlistMenu(p) }) }) {
+                Box(Modifier.pointerInput(p) { detectTapGestures(onLongPress = { m.playlistMenu(p) }) }) {
                     GButton(p, "list-music", "chip", active = name == key, iconSize = 14) { m.showCollection(key) }
                 }
             }

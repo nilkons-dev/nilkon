@@ -221,7 +221,7 @@ object Engine {
         val cm = app?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
         stopCallback()
         val cb = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) { main.post { if (waiting) run { resumeNow(it) } } }
+            override fun onAvailable(network: Network) { main.post { if (waiting) Engine.run { resumeNow(it) } } }
         }
         netCallback = cb
         runCatching { cm.registerDefaultNetworkCallback(cb) }
