@@ -127,7 +127,7 @@ private fun Toasts(modifier: Modifier) {
 private fun BottomBar(m: AppModel) {
     val shape = RoundedCornerShape(26.dp)
     val items = listOf(Triple("home", "Home", "home"), Triple("online", "Online", "globe"), Triple("collection", "Library", "library"),
-        Triple("now", "Playing", "disc"), Triple("settings", "Settings", "settings"))
+        Triple("settings", "Settings", "settings"))
     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp).padding(bottom = 8.dp).clip(shape).background(cardFill).border(1.dp, cardEdge, shape).padding(4.dp)) {
         for ((k, label, icon) in items) {
             val sel = m.page == k

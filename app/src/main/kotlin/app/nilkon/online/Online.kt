@@ -34,7 +34,8 @@ object Online {
         .connectTimeout(12, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS)
         .followRedirects(true).build()
 
-    private val urlCache = ConcurrentHashMap<String, Pair<Long, String>>()
+    private class Resolved(val at: Long, val url: String, val ua: String)
+    private val urlCache = ConcurrentHashMap<String, Resolved>()
     private const val TTL_MS = 20 * 60 * 1000L
     @Volatile private var ready = false
 
@@ -70,11 +71,22 @@ object Online {
 
     /** One song from its id (used when a link is pasted into the search box). */
     fun lookup(videoId: String): Song {
-        val info = StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$videoId")
-        val art = info.thumbnails.maxByOrNull { it.height }?.url ?: ""
-        val title = info.name ?: "Unknown"
-        val artist = (info.uploaderName ?: "").removeSuffix(" - Topic")
-        return Song.online(videoId, title, artist, "", (if (info.duration > 0) info.duration else 0L) * 1000L, art)
+        var first: Throwable? = null
+        try {
+            val d = playerCall(videoId, VR).optJSONObject("videoDetails")
+            if (d != null && d.optString("title").isNotEmpty()) {
+                val th = d.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
+                val art = if (th != null && th.length() > 0) th.getJSONObject(th.length() - 1).optString("url") else ""
+                return Song.online(videoId, d.optString("title"), d.optString("author").removeSuffix(" - Topic"), "",
+                    d.optString("lengthSeconds").toLongOrNull()?.times(1000L) ?: 0L, art)
+            }
+        } catch (e: Throwable) { first = e }
+        try {
+            val info = StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$videoId")
+            val art = info.thumbnails.maxByOrNull { it.height }?.url ?: ""
+            return Song.online(videoId, info.name ?: "Unknown", (info.uploaderName ?: "").removeSuffix(" - Topic"), "",
+                (if (info.duration > 0) info.duration else 0L) * 1000L, art)
+        } catch (e: Throwable) { throw first ?: e }
     }
 
     private val sizeRegex = Regex("=w\\d+-h\\d+.*$")
@@ -202,17 +214,79 @@ object Online {
     }
 
     // ---------------------------------------------------------------------------- streaming
-    /** Address of the best audio stream for [videoId]. Cached for 20 minutes. */
-    fun resolve(videoId: String): String {
-        urlCache[videoId]?.let { (t, u) -> if (System.currentTimeMillis() - t < TTL_MS) return u }
+    private class Client(val name: String, val id: String, val version: String, val ua: String, val extra: JSONObject.() -> Unit)
+
+    private val VR = Client("ANDROID_VR", "28", "1.60.19",
+        "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip") {
+        put("deviceMake", "Oculus"); put("deviceModel", "Quest 3"); put("osName", "Android"); put("osVersion", "12L")
+        put("androidSdkVersion", 32)
+    }
+    private val ANDROID = Client("ANDROID", "3", "19.44.38",
+        "com.google.android.youtube/19.44.38 (Linux; U; Android 11) gzip") {
+        put("osName", "Android"); put("osVersion", "11"); put("androidSdkVersion", 30)
+    }
+
+    private fun playerCall(videoId: String, c: Client): JSONObject {
+        val cl = JSONObject().put("clientName", c.name).put("clientVersion", c.version)
+            .put("hl", "en").put("gl", "US").put("userAgent", c.ua)
+        c.extra(cl)
+        val body = JSONObject().put("context", JSONObject().put("client", cl)).put("videoId", videoId)
+            .put("contentCheckOk", true).put("racyCheckOk", true)
+        val req = Request.Builder().url("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
+            .header("User-Agent", c.ua).header("X-YouTube-Client-Name", c.id).header("X-YouTube-Client-Version", c.version)
+            .header("Origin", "https://www.youtube.com")
+            .post(body.toString().toRequestBody("application/json".toMediaType())).build()
+        client.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) throw IOException("The music service answered ${r.code}")
+            return JSONObject(r.body?.string() ?: throw IOException("Empty answer"))
+        }
+    }
+
+    private fun viaPlayer(videoId: String, c: Client): Resolved {
+        val j = playerCall(videoId, c)
+        val st = j.optJSONObject("playabilityStatus")
+        val status = st?.optString("status") ?: ""
+        if (status.isNotEmpty() && status != "OK")
+            throw IOException(st?.optString("reason")?.ifEmpty { null } ?: "This song can't be played ($status)")
+        val fmts = j.optJSONObject("streamingData")?.optJSONArray("adaptiveFormats") ?: throw IOException("No audio stream found for this song")
+        var best: JSONObject? = null
+        var bestScore = -1L
+        for (i in 0 until fmts.length()) {
+            val f = fmts.getJSONObject(i)
+            val mime = f.optString("mimeType")
+            if (!mime.startsWith("audio/") || f.optString("url").isEmpty()) continue
+            val score = f.optLong("bitrate") + if (mime.contains("mp4a")) 1_000_000_000L else 0L   // AAC plays everywhere
+            if (score > bestScore) { bestScore = score; best = f }
+        }
+        val url = best?.optString("url") ?: throw IOException("No audio stream found for this song")
+        return Resolved(System.currentTimeMillis(), url, c.ua)
+    }
+
+    private fun viaNewPipe(videoId: String): Resolved {
         val info = StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$videoId")
         val audio = info.audioStreams.filter { it.content.isNotEmpty() && it.isUrl }
         val pick = audio.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
             ?: audio.maxByOrNull { it.averageBitrate }
             ?: throw IOException("No audio stream found for this song")
-        urlCache[videoId] = System.currentTimeMillis() to pick.content
-        return pick.content
+        return Resolved(System.currentTimeMillis(), pick.content, UA)
     }
+
+    private fun resolveFull(videoId: String): Resolved {
+        urlCache[videoId]?.let { if (System.currentTimeMillis() - it.at < TTL_MS) return it }
+        var err: Throwable? = null
+        val steps = listOf<() -> Resolved>({ viaPlayer(videoId, VR) }, { viaPlayer(videoId, ANDROID) }, { viaNewPipe(videoId) })
+        for (step in steps) {
+            try { val r = step(); urlCache[videoId] = r; return r }
+            catch (e: Throwable) { if (err == null || isNetworkError(e)) err = e; if (isNetworkError(e)) break }
+        }
+        throw err ?: IOException("Could not load this song")
+    }
+
+    /** Address of the best audio stream for [videoId]. Cached for 20 minutes. */
+    fun resolve(videoId: String): String = resolveFull(videoId).url
+
+    /** The User-Agent the stream address must be requested with. */
+    fun userAgentFor(videoId: String): String = urlCache[videoId]?.ua ?: UA
 
     fun forget(videoId: String) { urlCache.remove(videoId) }
 
@@ -232,6 +306,7 @@ object Online {
     fun download(song: Song, dir: File, progress: (Float) -> Unit, cancelled: () -> Boolean): File {
         dir.mkdirs()
         val url = resolve(song.videoId)
+        val ua = userAgentFor(song.videoId)
         val target = File(dir, safeName("${song.artist} - ${song.title}".trim(' ', '-')).ifEmpty { song.videoId } + ".m4a")
         val part = File(dir, target.name + ".part")
         try {
@@ -241,7 +316,7 @@ object Online {
                 val chunk = 3L * 1024 * 1024
                 while (total < 0 || start < total) {
                     if (cancelled()) throw IOException("Cancelled")
-                    val req = Request.Builder().url(url).header("User-Agent", UA)
+                    val req = Request.Builder().url(url).header("User-Agent", ua)
                         .header("Range", "bytes=$start-${start + chunk - 1}").build()
                     client.newCall(req).execute().use { r ->
                         if (r.code != 200 && r.code != 206) { forget(song.videoId); throw IOException("Download refused (${r.code})") }

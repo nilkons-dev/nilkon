@@ -128,6 +128,22 @@ class AppModel(val app: Context) {
         else -> emptyList()
     }
 
+    /** Can the songs of the open collection be re-ordered by hand? */
+    fun canReorder(): Boolean = collectionQuery.isBlank() && (collection == LIKED || collection.startsWith(PL_PREFIX))
+
+    /** Moves [key] one place down (+1) or up (-1) in the open collection. */
+    fun moveStep(key: String, dir: Int): Boolean {
+        val c = collection
+        val ok = if (c == LIKED) Store.moveLiked(key, dir)
+        else if (c.startsWith(PL_PREFIX)) {
+            val n = c.removePrefix(PL_PREFIX)
+            val i = Store.playlists[n]?.indexOf(key) ?: -1
+            Store.movePlaylistItem(n, i, i + dir)
+        } else false
+        if (ok) changed()
+        return ok
+    }
+
     fun visibleSongs(): List<Song> {
         val all = songsOf(collection)
         val q = collectionQuery.trim().lowercase()
@@ -240,6 +256,20 @@ class AppModel(val app: Context) {
         items += MenuItem("plus", "New playlist…") { createPlaylist(s) }
         menu = MenuSpec("Add to playlist", s.title, items)
     }
+    fun libraryMenu() {
+        val items = ArrayList<MenuItem>()
+        items += MenuItem("plus", "Add music files") { pickFiles() }
+        items += MenuItem("folder-plus", "Add a music folder") { pickFolder() }
+        items += MenuItem("reset", "Rescan this phone") { scan() }
+        if (collection.startsWith(PL_PREFIX)) {
+            val n = collection.removePrefix(PL_PREFIX)
+            items += MenuItem.divider()
+            items += MenuItem("edit", "Rename playlist…") { renamePlaylist(n) }
+            items += MenuItem("trash", "Delete playlist…", danger = true) { deletePlaylist(n) }
+        }
+        menu = MenuSpec(collectionTitle(collection), "", items)
+    }
+
     fun playlistMenu(name: String) {
         menu = MenuSpec(name, "${Store.playlists[name]?.size ?: 0} songs", listOf(
             MenuItem("edit", "Rename playlist…") { renamePlaylist(name) },

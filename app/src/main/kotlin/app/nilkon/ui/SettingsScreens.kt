@@ -31,7 +31,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 const val APP_NAME = "NILKON"
-const val APP_VERSION = "1.7.2"
+const val APP_VERSION = "1.7.3"
 const val APP_TAGLINE = "Your music. Your frequency."
 
 private val PAGES = listOf(
@@ -269,10 +269,6 @@ private fun OnlineSettings(m: AppModel) {
     SettingRow("Music engine", "If online playback or downloads stop working, refresh the engine. Updating NILKON itself brings the newest engine.") {
         GButton("Refresh", "reset", "glass", iconSize = 16) { m.updateEngine() }
     }
-    Section("DISCORD RICH PRESENCE")
-    Note("Discord Rich Presence needs the Discord desktop app, so it is only available in the Windows version of NILKON.")
-    Section("SIGN-IN HELP")
-    Note("The browser sign-in option of the Windows version is not needed on Android: the built-in engine fetches songs without a browser.")
 }
 
 @Composable
@@ -295,7 +291,7 @@ private fun LibraryPage(m: AppModel) {
 @Composable
 private fun AboutPage() {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        CatLogo(72.dp)
+        CatLogo(60.dp)
         Spacer(Modifier.width(16.dp))
         Column {
             Txt(APP_NAME, 24, FontWeight.ExtraBold, textMain, 1, spacing = 3f)
@@ -312,7 +308,7 @@ private fun AboutPage() {
         "SOUND" to listOf("Studio 10-band equalizer with 24 presets, bass / treble tone controls and your own saved presets",
             "Smart headroom keeps boosted songs clean, with a separate setting for any single song",
             "Sound waves and seek bar drawn from the real spectrum of the song, beat by beat"),
-        "YOUR LIBRARY" to listOf("Unlimited playlists with long-press drag ordering - local and online songs together",
+        "YOUR LIBRARY" to listOf("Unlimited playlists with drag-handle ordering - local and online songs together",
             "Favourites, recently played and a home page that suggests what you love most",
             "Cover art, rename and delete"),
         "CONTROL" to listOf("Control playback from the notification panel, the lock screen, headset and Bluetooth buttons - even with the screen off",

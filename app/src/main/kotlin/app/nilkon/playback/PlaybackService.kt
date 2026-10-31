@@ -33,14 +33,14 @@ class PlaybackService : MediaSessionService() {
         Store.init(this)
         Online.init(this)
 
-        val http = OkHttpDataSource.Factory(Online.client).setUserAgent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+        val http = OkHttpDataSource.Factory(Online.client)
         val upstream = DefaultDataSource.Factory(this, http)
         // "nilkon://yt/<id>" is turned into the real stream address right before it is loaded
         val resolving = ResolvingDataSource.Factory(upstream) { spec: DataSpec ->
             if (spec.uri.scheme == "nilkon") {
                 val id = spec.uri.lastPathSegment ?: throw IOException("Bad song address")
-                spec.withUri(Uri.parse(Online.resolve(id)))
+                val u = Online.resolve(id)
+                spec.withUri(Uri.parse(u)).withAdditionalHeaders(mapOf("User-Agent" to Online.userAgentFor(id)))
             } else spec
         }
         val load = DefaultLoadControl.Builder()

@@ -11,6 +11,7 @@ import com.caverock.androidsvg.SVG
 /** Draws an SVG document (parsed from text) into the given box. Parse errors draw nothing. */
 fun DrawScope.drawSvgText(text: String, left: Float, top: Float, w: Float, h: Float) {
     val svg: SVG = try { SVG.getFromString(text) } catch (e: Exception) { return }
+    svg.setDocumentWidth("100%"); svg.setDocumentHeight("100%")   // fill the box instead of the file's own pixel size
     drawIntoCanvas { c -> svg.renderToCanvas(c.nativeCanvas, RectF(left, top, left + w, top + h)) }
 }
 
@@ -29,6 +30,7 @@ private fun iconSvg(name: String, color: Color): SVG? {
         "fill=\"$hexc\" fill-opacity=\"$al\" stroke=\"$hexc\" stroke-opacity=\"$al\" stroke-width=\"1.6\" stroke-linejoin=\"round\""
     val text = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\" height=\"24\"><g $g>${def.second}</g></svg>"
     val svg = try { SVG.getFromString(text) } catch (e: Exception) { return null }
+    svg.setDocumentWidth("100%"); svg.setDocumentHeight("100%")
     if (iconCache.size > 600) iconCache.clear()
     iconCache[key] = svg
     return svg

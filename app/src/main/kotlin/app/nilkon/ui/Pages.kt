@@ -3,7 +3,6 @@ package app.nilkon.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -52,8 +51,8 @@ fun HomePage(m: AppModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CatLogo(56.dp)
-            WordMark(40.dp)
+            CatLogo(46.dp)
+            WordMark(30.dp)
         }
         // hero with live waves
         val shape = RoundedCornerShape(24.dp)
@@ -182,20 +181,18 @@ fun CollectionPage(m: AppModel) {
                 Txt(m.collectionTitle(name), 22, FontWeight.ExtraBold)
                 Txt(countText, 12, FontWeight.Normal, textSub)
             }
-            if (isPl) IconButton("more", 40, 20, ink(0.8f)) { m.playlistMenu(plName) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             GButton("Play", "play", "primary", enabled = songs.isNotEmpty(), iconSize = 16) { m.playCollection(false) }
             GButton("Shuffle", "shuffle", "glass", enabled = songs.isNotEmpty(), iconSize = 16) { m.playCollection(true) }
             Spacer(Modifier.weight(1f))
-            GButton("", "plus", "round", iconSize = 18) { m.pickFiles() }
-            GButton("", "folder-plus", "round", iconSize = 18) { m.pickFolder() }
+            GButton("", "more", "round", iconSize = 18) { m.libraryMenu() }
         }
         GlassField(m.collectionQuery, { m.collectionQuery = it }, "Search songs, artists, albums…", Modifier.fillMaxWidth())
         if (songs.isEmpty()) {
             val (t, d) = when {
-                m.library.isEmpty() && name == ALL -> if (!m.hasAudioPermission) "Allow access to your music" to "NILKON needs permission to read the music on this phone. You can also add files or a folder with the buttons above."
-                    else "Your library is empty" to "Add audio files or a folder with the buttons above."
+                m.library.isEmpty() && name == ALL -> if (!m.hasAudioPermission) "Allow access to your music" to "NILKON needs permission to read the music on this phone. You can also add files or a folder with the ⋯ button above."
+                    else "Your library is empty" to "Add audio files or a folder with the ⋯ button above."
                 searching -> "No matches" to "Nothing in this collection matches your search."
                 name == LIKED -> "No favourites yet" to "Tap the heart next to a song to keep it here."
                 name == RECENT -> "Nothing played yet" to "The songs you play will appear here."
@@ -213,30 +210,24 @@ fun CollectionPage(m: AppModel) {
                 }
             }
         } else {
-            val canDrag = isPl && !searching
+            val canDrag = m.canReorder()
             var dragKey by remember { mutableStateOf<String?>(null) }
             var dragY by remember { mutableFloatStateOf(0f) }
+            val rowH = with(androidx.compose.ui.platform.LocalDensity.current) { ROW_H.dp.toPx() }
             LazyColumn(Modifier.fillMaxSize()) {
                 itemsIndexed(songs, key = { _, s -> s.key }) { i, s ->
                     val dragging = dragKey == s.key
-                    Box(Modifier.zIndex(if (dragging) 1f else 0f).graphicsLayer { translationY = if (dragging) dragY else 0f; alpha = if (dragging) 0.92f else 1f }
-                        .then(if (canDrag) Modifier.pointerInput(s.key, plName) {
-                            val rowH = ROW_H.dp.toPx()
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = { dragKey = s.key; dragY = 0f },
-                                onDrag = { c, d ->
-                                    c.consume(); dragY += d.y
-                                    val list = Store.playlists[plName]
-                                    val cur = list?.indexOf(s.key) ?: -1
-                                    if (list != null && cur >= 0) {
-                                        if (dragY > rowH * 0.55f && cur < list.size - 1) { Store.movePlaylistItem(plName, cur, cur + 1); m.changed(); dragY -= rowH }
-                                        else if (dragY < -rowH * 0.55f && cur > 0) { Store.movePlaylistItem(plName, cur, cur - 1); m.changed(); dragY += rowH }
-                                    }
-                                },
-                                onDragEnd = { dragKey = null; dragY = 0f },
-                                onDragCancel = { dragKey = null; dragY = 0f })
-                        } else Modifier)) {
-                        TrackRow(m, s, i, longPressMenu = !canDrag, showGrip = canDrag && dragging) { m.playFrom(songs, s) }
+                    val reorder = if (!canDrag) null else Reorder(
+                        start = { dragKey = s.key; dragY = 0f },
+                        drag = { dy ->
+                            dragY += dy
+                            if (dragY > rowH * 0.6f) { if (m.moveStep(s.key, 1)) dragY -= rowH else dragY = rowH * 0.6f }
+                            else if (dragY < -rowH * 0.6f) { if (m.moveStep(s.key, -1)) dragY += rowH else dragY = -rowH * 0.6f }
+                        },
+                        end = { dragKey = null; dragY = 0f })
+                    Box(Modifier.zIndex(if (dragging) 1f else 0f)
+                        .graphicsLayer { translationY = if (dragging) dragY else 0f; alpha = if (dragging) 0.92f else 1f }) {
+                        TrackRow(m, s, i, reorder = reorder) { m.playFrom(songs, s) }
                     }
                 }
                 item { Spacer(Modifier.height(12.dp)) }

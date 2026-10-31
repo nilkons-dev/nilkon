@@ -77,7 +77,9 @@ fun NowPlayingPage(m: AppModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Eyebrow("NOW PLAYING", Modifier.weight(1f))
+            IconButton("x", 40, 18, ink(0.8f)) { m.page = m.lastPage }
+            Eyebrow("NOW PLAYING", Modifier.weight(1f).padding(start = 6.dp))
+            IconButton("eq", 40, 20, ink(0.8f)) { m.openEq(cur, false) }
             val liked = cur != null && cur.key in Store.liked
             IconButton(if (liked) "heart-fill" else "heart", 40, 20, if (liked) heartColor else ink(0.7f)) { cur?.let { m.toggleLike(it) } }
             IconButton("more", 40, 20, ink(0.8f)) { cur?.let { m.songMenu(it) } }
@@ -95,22 +97,12 @@ fun NowPlayingPage(m: AppModel) {
         Spacer(Modifier.height(2.dp))
         Controls(1f)
         Spacer(Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            val step = Store.int("seek_step")
-            GButton("−$step s", null, "chip") { Engine.seekBy(-step) }
-            GButton("+$step s", null, "chip") { Engine.seekBy(step) }
-        }
-        Spacer(Modifier.height(6.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(if (Engine.muted || Engine.volume == 0) "volume-x" else if (Engine.volume < 40) "volume-1" else "volume-2", 40, 19,
                 ink(0.8f)) { Engine.toggleMute() }
-            GButton("−", null, "chip") { Engine.nudgeVolume(-Store.int("volume_step")) }
             GlassSlider(if (Engine.muted) 0 else Engine.volume, 0, 100, Modifier.weight(1f).height(32.dp).padding(horizontal = 6.dp)) { Engine.setVolume(it) }
-            GButton("+", null, "chip") { Engine.nudgeVolume(Store.int("volume_step")) }
             Txt("${if (Engine.muted) 0 else Engine.volume}", 12, FontWeight.Medium, ink(0.6f), 1, Modifier.width(34.dp), TextAlign.End)
         }
-        Spacer(Modifier.height(8.dp))
-        GButton("Equalizer", "eq", "glass", Modifier.fillMaxWidth(), iconSize = 18) { m.openEq(cur, false) }
         Spacer(Modifier.height(14.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Eyebrow("UP NEXT", Modifier.weight(1f))

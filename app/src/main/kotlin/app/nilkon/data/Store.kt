@@ -174,10 +174,20 @@ object Store {
 
     fun removeFromPlaylist(name: String, key: String) { playlists[name]?.remove(key); touch() }
 
-    fun movePlaylistItem(name: String, from: Int, to: Int) {
-        val l = playlists[name] ?: return
-        if (from !in l.indices || to !in l.indices) return
-        l.add(to, l.removeAt(from)); touch()
+    fun movePlaylistItem(name: String, from: Int, to: Int): Boolean {
+        val l = playlists[name] ?: return false
+        if (from !in l.indices || to !in l.indices) return false
+        l.add(to, l.removeAt(from)); touch(); return true
+    }
+
+    /** Moves a liked song one place in the list as it is shown (newest first). */
+    fun moveLiked(key: String, dir: Int): Boolean {
+        val l = liked.toMutableList()
+        val i = l.indexOf(key)
+        val j = i - dir                      // the list is shown reversed
+        if (i < 0 || j !in l.indices) return false
+        l.add(j, l.removeAt(i))
+        liked.clear(); liked.addAll(l); touch(); return true
     }
 
     fun recordPlay(s: Song) {

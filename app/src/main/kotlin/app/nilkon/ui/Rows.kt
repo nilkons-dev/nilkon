@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -42,7 +43,7 @@ fun IconButton(icon: String, size: Int = 36, iconSize: Int = 18, color: Color = 
 /** One song in a list: number / now-playing bars, cover, title, artist, favourite, length and the ⋯ menu. */
 @Composable
 fun TrackRow(m: AppModel, song: Song, index: Int, modifier: Modifier = Modifier, longPressMenu: Boolean = true,
-             showGrip: Boolean = false, onPlay: () -> Unit) {
+             showGrip: Boolean = false, reorder: Reorder? = null, onPlay: () -> Unit) {
     val isCur = Engine.isCurrent(song.key)
     val playingNow = isCur && Engine.isPlaying
     m.rev
@@ -76,11 +77,24 @@ fun TrackRow(m: AppModel, song: Song, index: Int, modifier: Modifier = Modifier,
         }
         Box(Modifier.size(38.dp).clip(CircleShape).clickable(remember { MutableInteractionSource() }, null) { m.toggleLike(song) },
             contentAlignment = Alignment.Center) { Ico(if (liked) "heart-fill" else "heart", 19, if (liked) heartColor else ink(0.45f)) }
-        Txt(if (song.durationMs > 0) fmtTime(song.durationMs) else "—", 12, FontWeight.Normal, ink(0.58f), 1,
-            Modifier.widthIn(min = 38.dp), androidx.compose.ui.text.style.TextAlign.Center)
-        IconButton("more", 36, 20, ink(0.7f)) { m.songMenu(song) }
+        if (reorder == null) {
+            Txt(if (song.durationMs > 0) fmtTime(song.durationMs) else "—", 12, FontWeight.Normal, ink(0.58f), 1,
+                Modifier.widthIn(min = 38.dp), androidx.compose.ui.text.style.TextAlign.Center)
+            IconButton("more", 36, 20, ink(0.7f)) { m.songMenu(song) }
+        } else {
+            IconButton("more", 36, 20, ink(0.7f)) { m.songMenu(song) }
+            // drag handle: hold and move up / down
+            Box(Modifier.width(44.dp).fillMaxHeight().pointerInput(song.key) {
+                detectDragGestures(onDragStart = { reorder.start() }, onDragEnd = { reorder.end() }, onDragCancel = { reorder.end() }) { change, d ->
+                    change.consume(); reorder.drag(d.y)
+                }
+            }, contentAlignment = Alignment.Center) { Ico("grip", 20, ink(0.6f)) }
+        }
     }
 }
+
+/** Callbacks of a row's drag handle. */
+class Reorder(val start: () -> Unit, val drag: (Float) -> Unit, val end: () -> Unit)
 
 /** Card used on the Home page. */
 @Composable
