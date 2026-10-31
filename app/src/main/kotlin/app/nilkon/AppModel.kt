@@ -425,7 +425,7 @@ class AppModel(val app: Context) {
     private var seq = 0
     private val searchRun = Runnable { runSearch() }
 
-    fun setOnlineQuery(q: String) {
+    fun typeOnlineQuery(q: String) {
         onlineQuery = q
         main.removeCallbacks(searchRun)
         if (q.trim().length < 2) { seq++; onlineState = "idle"; onlineResults = emptyList(); return }

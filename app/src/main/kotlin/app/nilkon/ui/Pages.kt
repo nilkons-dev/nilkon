@@ -118,7 +118,7 @@ fun OnlinePage(m: AppModel) {
             Txt("Online", 24, FontWeight.ExtraBold)
             Txt(if (m.onlineState == "loading") "Searching…" else "Search any song · stream instantly · download to listen offline", 12, FontWeight.Normal, textSub, 2)
         }
-        GlassField(m.onlineQuery, { m.setOnlineQuery(it) }, "Search songs, or paste a song link…", Modifier.fillMaxWidth(), "search", { m.searchNow() })
+        GlassField(m.onlineQuery, { m.typeOnlineQuery(it) }, "Search songs, or paste a song link…", Modifier.fillMaxWidth(), "search", { m.searchNow() })
         when (m.onlineState) {
             "done" -> LazyColumn(Modifier.fillMaxSize()) {
                 items(m.onlineResults, key = { it.key }) { s -> OnlineRow(m, s) { m.playOnline(s) } }

@@ -145,7 +145,7 @@ object Engine {
         val t = (p.currentPosition + seconds * 1000L).coerceIn(0L, dur)
         p.seekTo(t); positionMs = t
     }
-    fun setShuffle(on: Boolean) = run { p -> p.shuffleModeEnabled = on; shuffle = on }
+    fun shuffleTo(on: Boolean) = run { p -> p.shuffleModeEnabled = on; shuffle = on }
     fun cycleRepeat() = run { p ->
         p.repeatMode = when (p.repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
             Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF }

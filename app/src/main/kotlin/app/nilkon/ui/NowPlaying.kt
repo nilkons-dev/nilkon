@@ -52,7 +52,7 @@ private fun formatPill(m: AppModel): String {
 @Composable
 fun Controls(scale: Float) {
     Row(horizontalArrangement = Arrangement.spacedBy((10 * scale).dp), verticalAlignment = Alignment.CenterVertically) {
-        CatButton("toggle", "shuffle", scale, Engine.shuffle) { Engine.setShuffle(!Engine.shuffle) }
+        CatButton("toggle", "shuffle", scale, Engine.shuffle) { Engine.shuffleTo(!Engine.shuffle) }
         CatButton("prev", "prev", scale) { Engine.previous() }
         CatButton("play", if (Engine.isPlaying) "pause" else "play", scale) { Engine.toggle() }
         CatButton("next", "next", scale) { Engine.next() }
