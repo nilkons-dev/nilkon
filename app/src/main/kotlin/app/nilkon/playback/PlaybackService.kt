@@ -40,7 +40,13 @@ class PlaybackService : MediaSessionService() {
             if (spec.uri.scheme == "nilkon") {
                 val id = spec.uri.lastPathSegment ?: throw IOException("Bad song address")
                 val u = Online.resolve(id)
-                spec.withUri(Uri.parse(u)).withAdditionalHeaders(mapOf("User-Agent" to Online.userAgentFor(id)))
+                val len = Online.streamLength(u)
+                val headers = mapOf("User-Agent" to Online.userAgentFor(id))
+                if (len != null && spec.position < len) {
+                    // the video server wants the byte range inside the address
+                    spec.buildUpon().setUri(Uri.parse(Online.rangedUrl(u, spec.position, len - 1)))
+                        .setPosition(0).setLength(C.LENGTH_UNSET.toLong()).setHttpRequestHeaders(headers).build()
+                } else spec.withUri(Uri.parse(u)).withAdditionalHeaders(headers)
             } else spec
         }
         val load = DefaultLoadControl.Builder()

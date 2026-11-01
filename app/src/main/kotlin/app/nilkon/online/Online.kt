@@ -333,9 +333,19 @@ object Online {
         return Resolved(System.currentTimeMillis(), pick.content, UA)
     }
 
+    private val clenRegex = Regex("[?&]clen=(\\d+)")
+
+    /** Size of the stream when the address carries it (video servers want the range inside the address, not as a header). */
+    fun streamLength(url: String): Long? =
+        if (url.contains("googlevideo.com")) clenRegex.find(url)?.groupValues?.get(1)?.toLongOrNull() else null
+
+    fun rangedUrl(url: String, from: Long, to: Long): String = "$url&range=$from-$to"
+
     /** Asks for the first bytes of the stream, so an address the server would refuse is dropped before it is used. */
     private fun probe(r: Resolved) {
-        val req = Request.Builder().url(r.url).header("User-Agent", r.ua).header("Range", "bytes=0-1").build()
+        val len = streamLength(r.url)
+        val b = Request.Builder().header("User-Agent", r.ua)
+        val req = (if (len != null) b.url(rangedUrl(r.url, 0, 1)) else b.url(r.url).header("Range", "bytes=0-1")).build()
         val c = client.newBuilder().callTimeout(10, TimeUnit.SECONDS).build()
         c.newCall(req).execute().use { resp ->
             if (resp.code != 200 && resp.code != 206) throw IOException("Stream refused (${resp.code})")
@@ -386,12 +396,13 @@ object Online {
         try {
             part.outputStream().use { out ->
                 var start = 0L
-                var total = -1L
+                val clen = streamLength(url)
+                var total = clen ?: -1L
                 val chunk = 3L * 1024 * 1024
                 while (total < 0 || start < total) {
                     if (cancelled()) throw IOException("Cancelled")
-                    val req = Request.Builder().url(url).header("User-Agent", ua)
-                        .header("Range", "bytes=$start-${start + chunk - 1}").build()
+                    val req = (if (clen != null) Request.Builder().url(rangedUrl(url, start, minOf(start + chunk - 1, clen - 1))).header("User-Agent", ua)
+                        else Request.Builder().url(url).header("User-Agent", ua).header("Range", "bytes=$start-${start + chunk - 1}")).build()
                     client.newCall(req).execute().use { r ->
                         if (r.code != 200 && r.code != 206) { forget(song.videoId); throw IOException("Download refused (${r.code})") }
                         if (total < 0) {
@@ -402,7 +413,7 @@ object Online {
                         val got = body.byteStream().copyTo(out)
                         if (got == 0L) throw IOException("Empty answer")
                         start += got
-                        if (r.code == 200) start = total          // server ignored the range: whole file received
+                        if (r.code == 200 && clen == null) start = total          // server ignored the range: whole file received
                     }
                     progress((start.toFloat() / total).coerceIn(0f, 1f))
                 }
