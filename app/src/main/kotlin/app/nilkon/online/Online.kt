@@ -333,13 +333,22 @@ object Online {
         return Resolved(System.currentTimeMillis(), pick.content, UA)
     }
 
+    /** Asks for the first bytes of the stream, so an address the server would refuse is dropped before it is used. */
+    private fun probe(r: Resolved) {
+        val req = Request.Builder().url(r.url).header("User-Agent", r.ua).header("Range", "bytes=0-1").build()
+        val c = client.newBuilder().callTimeout(10, TimeUnit.SECONDS).build()
+        c.newCall(req).execute().use { resp ->
+            if (resp.code != 200 && resp.code != 206) throw IOException("Stream refused (${resp.code})")
+        }
+    }
+
     private fun resolveFull(videoId: String): Resolved {
         urlCache[videoId]?.let { if (System.currentTimeMillis() - it.at < TTL_MS) return it }
         var err: Throwable? = null
         val steps = listOf<() -> Resolved>({ viaPlayer(videoId, VR) }, { viaPlayer(videoId, ANDROID_MUSIC) }, { viaPlayer(videoId, TV_EMBED) },
             { viaPlayer(videoId, IOS) }, { viaPlayer(videoId, ANDROID) }, { viaPiped(videoId) }, { viaNewPipe(videoId) })
         for (step in steps) {
-            try { val r = step(); urlCache[videoId] = r; return r }
+            try { val r = step(); probe(r); urlCache[videoId] = r; return r }
             catch (e: Throwable) { if (err == null || isNetworkError(e)) err = e; if (isNetworkError(e)) break }
         }
         throw err ?: IOException("Could not load this song")
