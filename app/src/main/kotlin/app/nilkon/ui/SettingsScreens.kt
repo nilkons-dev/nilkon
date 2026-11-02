@@ -31,7 +31,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 const val APP_NAME = "NILKON"
-const val APP_VERSION = "1.7.3"
+const val APP_VERSION = "1.7.4"
 const val APP_TAGLINE = "Your music. Your frequency."
 
 private val PAGES = listOf(
