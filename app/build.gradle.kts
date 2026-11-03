@@ -11,8 +11,8 @@ android {
         applicationId = "app.nilkon.music"
         minSdk = 26
         targetSdk = 34
-        versionCode = 175
-        versionName = "1.7.5"
+        versionCode = 176
+        versionName = "1.7.6"
     }
     buildTypes {
         release {

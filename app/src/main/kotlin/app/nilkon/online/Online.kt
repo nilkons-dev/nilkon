@@ -35,7 +35,13 @@ object Online {
         .connectTimeout(12, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS)
         .followRedirects(true).build()
 
-    private class Resolved(val at: Long, val url: String, val ua: String)
+    class Resolved(val at: Long, val url: String, val ua: String) {
+        /** Biggest request size the server accepted for this address (0 = plain streaming). */
+        @Volatile var chunk: Long = 0L
+    }
+
+    /** What the player needs to read one song: address, User-Agent, size and the request size to use. */
+    class Stream(val url: String, val ua: String, val length: Long, val chunk: Long)
     private val urlCache = ConcurrentHashMap<String, Resolved>()
     private const val TTL_MS = 20 * 60 * 1000L
     @Volatile private var ready = false
@@ -352,23 +358,55 @@ object Online {
 
     fun rangedUrl(url: String, from: Long, to: Long): String = "$url&range=$from-$to"
 
-    /** Asks for the first bytes of the stream, so an address the server would refuse is dropped before it is used. */
+    private val probeClient: OkHttpClient by lazy { client.newBuilder().callTimeout(10, TimeUnit.SECONDS).build() }
+
+    /** Status code of one ranged request to [url] (only the headers are read). */
+    private fun codeOf(url: String, ua: String, from: Long, to: Long, header: Boolean): Int {
+        val b = Request.Builder().header("User-Agent", ua)
+        val req = (if (header) b.url(url).header("Range", "bytes=$from-$to") else b.url(rangedUrl(url, from, to))).build()
+        probeClient.newCall(req).execute().use { resp ->
+            AppLog.add("probe", "bytes $from-$to -> ${resp.code} ${resp.message}")
+            return resp.code
+        }
+    }
+
+    private fun ok(code: Int) = code == 200 || code == 206
+
+    /**
+     * Tries the address the way the player will use it: the start, a big first request, the request after it and
+     * the end of the file. Finds the biggest request size the server accepts. Throws when the address is refused.
+     */
     private fun probe(r: Resolved) {
         val len = streamLength(r.url)
-        val b = Request.Builder().header("User-Agent", r.ua)
-        val req = (if (len != null) b.url(rangedUrl(r.url, 0, 1)) else b.url(r.url).header("Range", "bytes=0-1")).build()
-        val c = client.newBuilder().callTimeout(10, TimeUnit.SECONDS).build()
-        c.newCall(req).execute().use { resp ->
-            AppLog.add("probe", "answer ${resp.code} ${resp.message} content-type=${resp.header("Content-Type")} length=${resp.header("Content-Length")}")
-            if (resp.code != 200 && resp.code != 206) throw IOException("Stream refused (${resp.code})")
+        if (len == null) {
+            val c = codeOf(r.url, r.ua, 0, 1, true)
+            if (!ok(c)) throw IOException("Stream refused ($c)")
+            r.chunk = 0L
+            return
         }
+        val first = codeOf(r.url, r.ua, 0, 1, false)
+        if (!ok(first)) throw IOException("Stream refused ($first)")
+        var picked = 0L
+        for (size in longArrayOf(3L shl 20, 1L shl 20, 256L shl 10, 64L shl 10)) {
+            val to = minOf(size - 1, len - 1)
+            if (ok(codeOf(r.url, r.ua, 0, to, false))) { picked = size; break }
+            if (to == len - 1) break                // whole file is smaller than this size, so smaller sizes will not help
+        }
+        if (picked == 0L) throw IOException("Stream refused (large requests)")
+        if (len > picked) {
+            val second = codeOf(r.url, r.ua, picked, minOf(2 * picked - 1, len - 1), false)
+            if (!ok(second)) throw IOException("Stream refused (second request $second)")
+            val tail = codeOf(r.url, r.ua, len - 2, len - 1, false)
+            if (!ok(tail)) throw IOException("Stream refused (end of file $tail)")
+        }
+        r.chunk = picked
+        AppLog.add("probe", "accepted, request size ${picked / 1024} KB")
     }
 
     private fun resolveFull(videoId: String): Resolved {
         urlCache[videoId]?.let { if (System.currentTimeMillis() - it.at < TTL_MS) return it }
         val steps = listOf<Pair<String, () -> Resolved>>(
-            "VR" to { viaPlayer(videoId, VR) }, "Music" to { viaPlayer(videoId, ANDROID_MUSIC) }, "TV" to { viaPlayer(videoId, TV_EMBED) },
-            "iOS" to { viaPlayer(videoId, IOS) }, "Android" to { viaPlayer(videoId, ANDROID) }, "Mirror" to { viaPiped(videoId) },
+            "VR" to { viaPlayer(videoId, VR) }, "iOS" to { viaPlayer(videoId, IOS) }, "Music" to { viaPlayer(videoId, ANDROID_MUSIC) }, "Android" to { viaPlayer(videoId, ANDROID) }, "Mirror" to { viaPiped(videoId) },
             "NewPipe" to { viaNewPipe(videoId) })
         val notes = ArrayList<String>()
         for ((name, step) in steps) {
@@ -397,6 +435,12 @@ object Online {
     /** Address of the best audio stream for [videoId]. Cached for 20 minutes. */
     fun resolve(videoId: String): String = resolveFull(videoId).url
 
+    /** Everything the player needs to read [videoId]. */
+    fun stream(videoId: String): Stream {
+        val r = resolveFull(videoId)
+        return Stream(r.url, r.ua, streamLength(r.url) ?: -1L, r.chunk)
+    }
+
     /** The User-Agent the stream address must be requested with. */
     fun userAgentFor(videoId: String): String = urlCache[videoId]?.ua ?: UA
 
@@ -420,8 +464,9 @@ object Online {
     /** Downloads the song into [dir]. Returns the file. [progress] gets 0..1. Throws on failure. */
     fun download(song: Song, dir: File, progress: (Float) -> Unit, cancelled: () -> Boolean): File {
         dir.mkdirs()
-        val url = resolve(song.videoId)
-        val ua = userAgentFor(song.videoId)
+        val rs = resolveFull(song.videoId)
+        val url = rs.url
+        val ua = rs.ua
         val target = File(dir, safeName("${song.artist} - ${song.title}".trim(' ', '-')).ifEmpty { song.videoId } + ".m4a")
         val part = File(dir, target.name + ".part")
         try {
@@ -429,7 +474,7 @@ object Online {
                 var start = 0L
                 val clen = streamLength(url)
                 var total = clen ?: -1L
-                val chunk = 3L * 1024 * 1024
+                val chunk = if (rs.chunk > 0) rs.chunk else 3L * 1024 * 1024
                 while (total < 0 || start < total) {
                     if (cancelled()) throw IOException("Cancelled")
                     val req = (if (clen != null) Request.Builder().url(rangedUrl(url, start, minOf(start + chunk - 1, clen - 1))).header("User-Agent", ua)

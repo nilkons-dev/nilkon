@@ -6,9 +6,8 @@ import android.net.Uri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
-import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -35,20 +34,8 @@ class PlaybackService : MediaSessionService() {
 
         val http = OkHttpDataSource.Factory(Online.client)
         val upstream = DefaultDataSource.Factory(this, http)
-        // "nilkon://yt/<id>" is turned into the real stream address right before it is loaded
-        val resolving = ResolvingDataSource.Factory(upstream) { spec: DataSpec ->
-            if (spec.uri.scheme == "nilkon") {
-                val id = spec.uri.lastPathSegment ?: throw IOException("Bad song address")
-                val u = Online.resolve(id)
-                val len = Online.streamLength(u)
-                val headers = mapOf("User-Agent" to Online.userAgentFor(id))
-                if (len != null && spec.position < len) {
-                    // the video server wants the byte range inside the address
-                    spec.buildUpon().setUri(Uri.parse(Online.rangedUrl(u, spec.position, len - 1)))
-                        .setPosition(0).setLength(C.LENGTH_UNSET.toLong()).setHttpRequestHeaders(headers).build()
-                } else spec.withUri(Uri.parse(u)).withAdditionalHeaders(headers)
-            } else spec
-        }
+        // "nilkon://yt/<id>" is turned into the real stream right before it is loaded (see YtSource)
+        val resolving = DataSource.Factory { YtSource(upstream.createDataSource()) }
         val load = DefaultLoadControl.Builder()
             .setBufferDurationsMs(20_000, 60_000, 1_500, 3_000).build()
         val p = ExoPlayer.Builder(this)
