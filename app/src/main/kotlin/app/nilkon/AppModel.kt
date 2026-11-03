@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.nilkon.data.LocalLibrary
 import app.nilkon.data.Song
+import app.nilkon.data.AppLog
 import app.nilkon.data.Store
 import app.nilkon.online.Online
 import app.nilkon.playback.Effects
@@ -477,7 +478,7 @@ class AppModel(val app: Context) {
                 res.onSuccess { l ->
                     l.forEach { Engine.register(it) }
                     onlineResults = l; onlineState = if (l.isEmpty()) "empty" else "done"
-                }.onFailure { e -> onlineResults = emptyList(); onlineState = "error"; onlineError = Online.friendlyError(e) }
+                }.onFailure { e -> onlineResults = emptyList(); onlineState = "error"; onlineError = Online.friendlyError(e); AppLog.add("search", "failed for \"" + onlineQuery.take(60) + "\"", e) }
             }
         }
     }
@@ -518,7 +519,7 @@ class AppModel(val app: Context) {
                 }
             } catch (e: Throwable) {
                 main.post {
-                    if (s.key in dlCancel) dl.remove(s.key) else { dl[s.key] = DlState("error", 0f, Online.friendlyError(e)); Engine.warn("Download failed: " + Online.friendlyError(e)) }
+                    if (s.key in dlCancel) dl.remove(s.key) else { AppLog.add("download", "failed ${s.key}", e); dl[s.key] = DlState("error", 0f, Online.friendlyError(e)); Engine.warn("Download failed: " + Online.friendlyError(e)) }
                     dlCancel -= s.key
                 }
             }
@@ -555,6 +556,19 @@ class AppModel(val app: Context) {
 
     fun clearRecent() { Store.history.clear(); changed(); Engine.say("Recently played cleared") }
     fun resetStats() { Store.plays.clear(); suggestions = emptyList(); changed(); Engine.say("Listening statistics reset") }
+
+    /** Settings > Problem log > "Test online playback": tries to open a stream and writes every step to the log. */
+    fun testOnline() {
+        AppLog.add("test", "online playback test started")
+        io.execute {
+            Online.forget("dQw4w9WgXcQ")
+            try {
+                val u = Online.resolve("dQw4w9WgXcQ")
+                AppLog.add("test", "OK - " + Online.describe(u))
+            } catch (e: Throwable) { AppLog.add("test", "FAILED", e) }
+            main.post { Engine.say("Test finished - see the log") }
+        }
+    }
 
     fun updateEngine() {
         Online.clearCache()

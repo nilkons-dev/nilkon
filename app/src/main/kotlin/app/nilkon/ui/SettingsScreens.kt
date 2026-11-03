@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.nilkon.AppModel
+import app.nilkon.data.AppLog
 import app.nilkon.data.Store
 import app.nilkon.playback.Engine
 import kotlin.math.abs
@@ -31,12 +32,12 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 const val APP_NAME = "NILKON"
-const val APP_VERSION = "1.7.4"
+const val APP_VERSION = "1.7.5"
 const val APP_TAGLINE = "Your music. Your frequency."
 
 private val PAGES = listOf(
     Triple("playback", "Playback", "disc"), Triple("appearance", "Appearance", "palette"), Triple("visualizer", "Visualizer", "waves"),
-    Triple("audio", "Audio", "eq"), Triple("online", "Online", "globe"), Triple("library", "Library", "library"), Triple("about", "About", "info"),
+    Triple("audio", "Audio", "eq"), Triple("online", "Online", "globe"), Triple("library", "Library", "library"), Triple("log", "Problem log", "pulse"), Triple("about", "About", "info"),
 )
 
 @Composable
@@ -72,6 +73,7 @@ fun SettingsRoot(m: AppModel) {
                     "audio" -> AudioPage(m)
                     "online" -> OnlineSettings(m)
                     "library" -> LibraryPage(m)
+                    "log" -> LogPage(m)
                     else -> AboutPage()
                 }
                 Spacer(Modifier.height(24.dp))
@@ -286,6 +288,27 @@ private fun LibraryPage(m: AppModel) {
     }
     Spacer(Modifier.height(6.dp))
     Txt("Library file: ${Store.dataPath()}", 11, FontWeight.Normal, textEyebrow, 4)
+}
+
+@Composable
+private fun LogPage(m: AppModel) {
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    val v = AppLog.version
+    val lines = remember(v) { AppLog.lines(120) }
+    Note("When a song does not play or download, open this page, tap Copy and send the text to the developer. Newest line is first.")
+    ChipRow {
+        GButton("Copy all", "check", "primary", iconSize = 15) {
+            clip.setText(androidx.compose.ui.text.AnnotatedString(AppLog.text(APP_VERSION))); Engine.say("Log copied")
+        }
+        GButton("Test online", "globe", "glass", iconSize = 15) { m.testOnline() }
+        GButton("Clear", "trash", "glass", iconSize = 15) { AppLog.clear() }
+    }
+    if (lines.isEmpty()) Note("The log is empty. Play an online song, then come back here.")
+    androidx.compose.foundation.text.selection.SelectionContainer {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (l in lines) Txt(l, 10, FontWeight.Normal, textSub, 12)
+        }
+    }
 }
 
 @Composable

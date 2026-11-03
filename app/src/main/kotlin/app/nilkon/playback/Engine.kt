@@ -20,6 +20,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import app.nilkon.data.Song
 import app.nilkon.data.Store
+import app.nilkon.data.AppLog
 import app.nilkon.online.Online
 import java.io.File
 import java.util.concurrent.Executors
@@ -327,6 +328,13 @@ object Engine {
             positionMs = new.positionMs
         }
         override fun onPlayerError(error: PlaybackException) {
+            AppLog.add("player", "${error.errorCodeName} (${error.errorCode}) song=${player?.currentMediaItem?.mediaId ?: "?"}", error)
+            var c: Throwable? = error
+            while (c != null) {
+                if (c is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)
+                    AppLog.add("player", "server said ${c.responseCode} for " + Online.describe(c.dataSpec.uri.toString()) + " headers=" + c.headerFields.keys.take(8))
+                c = c.cause
+            }
             val p = player ?: return
             val key = p.currentMediaItem?.mediaId ?: return
             val online = key.startsWith("yt:") && (Store.downloads[key]?.let { File(it).exists() } != true)

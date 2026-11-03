@@ -1,6 +1,7 @@
 package app.nilkon.online
 
 import android.content.Context
+import app.nilkon.data.AppLog
 import app.nilkon.data.Song
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -308,6 +309,7 @@ object Online {
         val j = playerCall(videoId, c)
         val st = j.optJSONObject("playabilityStatus")
         val status = st?.optString("status") ?: ""
+        AppLog.add("player-api", "${c.name}: status=${status.ifEmpty { "none" }} reason=${st?.optString("reason") ?: ""} formats=${j.optJSONObject("streamingData")?.optJSONArray("adaptiveFormats")?.length() ?: 0}")
         if (status.isNotEmpty() && status != "OK")
             throw IOException(st?.optString("reason")?.ifEmpty { null } ?: "This song can't be played ($status)")
         val fmts = j.optJSONObject("streamingData")?.optJSONArray("adaptiveFormats") ?: throw IOException("No audio stream found for this song")
@@ -333,6 +335,15 @@ object Online {
         return Resolved(System.currentTimeMillis(), pick.content, UA)
     }
 
+    /** Host and a few harmless parameters of a stream address (no signatures), for the problem log. */
+    fun describe(url: String): String {
+        val host = url.substringAfter("://").substringBefore('/').substringBefore('?')
+        fun q(k: String) = Regex("[?&]$k=([^&]*)").find(url)?.groupValues?.get(1)
+        val parts = listOfNotNull(q("c")?.let { "c=$it" }, q("clen")?.let { "clen=$it" }, q("mime")?.let { "mime=$it" },
+            if (url.contains("&range=")) "range-param" else null, q("expire")?.let { "expire=$it" })
+        return host + (if (parts.isEmpty()) "" else " (" + parts.joinToString(", ") + ")")
+    }
+
     private val clenRegex = Regex("[?&]clen=(\\d+)")
 
     /** Size of the stream when the address carries it (video servers want the range inside the address, not as a header). */
@@ -348,6 +359,7 @@ object Online {
         val req = (if (len != null) b.url(rangedUrl(r.url, 0, 1)) else b.url(r.url).header("Range", "bytes=0-1")).build()
         val c = client.newBuilder().callTimeout(10, TimeUnit.SECONDS).build()
         c.newCall(req).execute().use { resp ->
+            AppLog.add("probe", "answer ${resp.code} ${resp.message} content-type=${resp.header("Content-Type")} length=${resp.header("Content-Length")}")
             if (resp.code != 200 && resp.code != 206) throw IOException("Stream refused (${resp.code})")
         }
     }
@@ -360,8 +372,15 @@ object Online {
             "NewPipe" to { viaNewPipe(videoId) })
         val notes = ArrayList<String>()
         for ((name, step) in steps) {
-            try { val r = step(); probe(r); urlCache[videoId] = r; return r }
+            try {
+                val r = step()
+                AppLog.add("resolve", "$videoId $name: got address ${describe(r.url)}")
+                probe(r)
+                AppLog.add("resolve", "$videoId $name: server accepted the address")
+                urlCache[videoId] = r; return r
+            }
             catch (e: Throwable) {
+                AppLog.add("resolve", "$videoId $name: failed", e)
                 if (isNetworkError(e)) throw e
                 val m = e.message ?: e.javaClass.simpleName
                 notes += name + " " + when {
@@ -371,6 +390,7 @@ object Online {
                 }
             }
         }
+        AppLog.add("resolve", "$videoId: every method failed - " + notes.joinToString(" | "))
         throw IOException("All methods failed: " + notes.joinToString(" | "))
     }
 
